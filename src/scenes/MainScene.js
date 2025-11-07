@@ -122,6 +122,24 @@ export class MainScene extends Phaser.Scene {
     // Camera stays static, HUD scene will render on top
     this.events.emit('hud-init', this.getHUDPayload());
 
+    // Kill milestones configuration
+    this.killMilestoneTargets = [10, 100, 1000, 5000, 10000, 100000, 1000000];
+    this.killMilestonesShown = new Set();
+
+    // Easter egg: type "cbum" to spawn a massive zombie
+    this.easter = { buffer: '', secret: 'cbum' };
+    this.input.keyboard.on('keydown', (ev) => {
+      const k = ev.key ? ev.key.toLowerCase() : '';
+      if (/^[a-z]$/.test(k)) {
+        const s = this.easter.secret;
+        this.easter.buffer = (this.easter.buffer + k).slice(-s.length);
+        if (this.easter.buffer === s) {
+          this.spawnMassiveZombie();
+          this.easter.buffer = '';
+        }
+      }
+    });
+
   }
 
   update(time, delta) {
@@ -359,6 +377,87 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  // Easter egg: spawn a massive, very slow zombie with 30x HP
+  spawnMassiveZombie() {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const margin = 20;
+
+    // Pick a random edge position
+    const side = Phaser.Math.Between(0, 3);
+    let zx = 0, zy = 0;
+    switch (side) {
+      case 0: zx = Phaser.Math.Between(margin, w - margin); zy = margin; break;         // top
+      case 1: zx = Phaser.Math.Between(margin, w - margin); zy = h - margin; break;     // bottom
+      case 2: zx = margin; zy = Phaser.Math.Between(margin, h - margin); break;         // left
+      case 3: zx = w - margin; zy = Phaser.Math.Between(margin, h - margin); break;     // right
+    }
+
+    const z = this.zombies.get(zx, zy, 'zombie_massive');
+    if (!z) return;
+    z.setActive(true).setVisible(true);
+    z.setScale(3);
+    z.setDepth(0);
+    z.data = z.data || new Phaser.Data.DataManager(z);
+
+    const d = this.difficulty || {
+      zombieHpBase: 12,
+      zombieHpRange: 8,
+      zombieSpeedBase: 70,
+      speedRange: 50
+    };
+
+    // Base ranges from difficulty
+    const speedMin = d.zombieSpeedBase;
+    const speedMax = d.zombieSpeedBase + d.speedRange;
+    const hpMin = d.zombieHpBase;
+    const hpMax = d.zombieHpBase + d.zombieHpRange;
+
+    // Massive stats: very slow, huge health
+    const speed = Phaser.Math.Between(speedMin, speedMax) * 0.3;
+    const hp = Math.max(1, Math.round(Phaser.Math.Between(hpMin, hpMax) * 30));
+
+    z.data.set('speed', speed);
+    z.data.set('hp', hp);
+    // Keep default contact damage and cooldown (use scene defaults)
+    z.body.setCircle(66);
+
+    // Small audio cue
+    this.playTone(180, 120, 0.05, 'triangle', 900);
+  }
+
+  // Kill milestone announcement
+  showKillMilestone(k) {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const msg = this.add.text(w / 2, h / 2 - 160, `Milestone: ${k} Kills`, {
+      fontFamily: `'Press Start 2P','VT323',monospace`,
+      fontSize: '22px',
+      color: '#6A4C93',
+      stroke: '#1F2D3D',
+      strokeThickness: 2
+    })
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
+      .setDepth(9999)
+      .setAlpha(0.95);
+
+    // Fade and destroy after 2 seconds
+    this.time.delayedCall(2000, () => {
+      if (msg && msg.active) msg.destroy();
+    });
+  }
+
+  checkKillMilestone(total) {
+    for (const target of this.killMilestoneTargets || []) {
+      if (total >= target && !this.killMilestonesShown.has(target)) {
+        this.killMilestonesShown.add(target);
+        this.showKillMilestone(target);
+        break; // show one at a time if multiple thresholds passed at once
+      }
+    }
+  }
+
   handleBulletHit(bullet, zombie) {
     if (!bullet.active || !zombie.active) return;
     const dmg = bullet.data?.get('damage') || 10;
@@ -372,6 +471,7 @@ export class MainScene extends Phaser.Scene {
       bullet.destroy();
       this.runKills += 1;
       addKills(1);
+      this.checkKillMilestone(getState().totalKills);
       addCoins(10);
       this.events.emit('hud-update', this.getHUDPayload());
     } else {
@@ -544,6 +644,16 @@ export class MainScene extends Phaser.Scene {
     gTank.fillCircle(20, 14, 3);
     gTank.generateTexture('zombie_tank', 32, 32);
     gTank.destroy();
+
+    // Massive zombie (easter egg): much larger, distinct color
+    const gMass = this.make.graphics({ x: 0, y: 0, add: false });
+    gMass.fillStyle(0x6A4C93, 1); // purple-ish
+    gMass.fillCircle(22, 22, 22);
+    gMass.fillStyle(0x2A2A2A, 1);
+    gMass.fillCircle(14, 18, 4);
+    gMass.fillCircle(30, 18, 4);
+    gMass.generateTexture('zombie_massive', 44, 44);
+    gMass.destroy();
 
     // Blood particle: red square
     const gBlood = this.make.graphics({ x: 0, y: 0, add: false });

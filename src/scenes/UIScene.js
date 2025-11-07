@@ -19,7 +19,8 @@ export class UIScene extends Phaser.Scene {
       hpText: null,
       coinsText: null,
       killsText: null,
-      weaponText: null
+      weaponText: null,
+      signatureText: null
     };
     this.overlay = {
       container: null,
@@ -79,6 +80,13 @@ export class UIScene extends Phaser.Scene {
       fontSize: '14px',
       color: '#0D3B66'
     }).setDepth(1000).setScrollFactor(0);
+
+    // Bottom-right signature
+    this.hud.signatureText = this.add.text(this.scale.width - 12, this.scale.height - 12, 'v0.1.0-alpha - Caio Hentz - 2025', {
+      fontFamily: `'Press Start 2P','VT323',monospace`,
+      fontSize: '10px',
+      color: '#1F2D3D'
+    }).setOrigin(1, 1).setDepth(1000).setScrollFactor(0).setAlpha(0.85);
 
     // Create hidden game-over overlay
     this.buildOverlay();
@@ -313,6 +321,9 @@ export class UIScene extends Phaser.Scene {
     if (speedBtn) speedBtn.container.setPosition(cx, rowY(2));
     if (this.overlay.shotgunBtn) this.overlay.shotgunBtn.container.setPosition(cx, rowY(3));
     if (this.overlay.restartBtn) this.overlay.restartBtn.container.setPosition(cx, rowY(5));
+
+    // Position signature in bottom-right
+    if (this.hud.signatureText) this.hud.signatureText.setPosition(w - 12, h - 10);
   }
 
   // ----- Pause overlay -----

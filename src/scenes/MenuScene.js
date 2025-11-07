@@ -16,12 +16,12 @@ export class MenuScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#FFFFF2');
 
     // Title: HURDZ!
-    this.titleText = this.add.text(w / 2, h / 2 - 80, 'HURDZ!', {
+    this.titleText = this.add.text(w / 2, h / 2 - 110, 'HURDZ!', {
       fontFamily: `'Press Start 2P','VT323',monospace`,
-      fontSize: '36px',
+      fontSize: '80px',
       color: '#1F2D3D',
       stroke: '#419D78',
-      strokeThickness: 2
+      strokeThickness: 3
     })
       .setOrigin(0.5, 0.5)
       .setDepth(10)
@@ -60,7 +60,7 @@ export class MenuScene extends Phaser.Scene {
   layout() {
     const w = this.scale.width;
     const h = this.scale.height;
-    if (this.titleText) this.titleText.setPosition(w / 2, h / 2 - 80);
+    if (this.titleText) this.titleText.setPosition(w / 2, h / 2 - 110);
     if (this.promptText) this.promptText.setPosition(w / 2, h / 2 + 10);
   }
 }
