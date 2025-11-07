@@ -23,6 +23,45 @@
         image-rendering: pixelated;
       }
     </style>
+  <script>
+    (function() {
+      const makeFavicon = () => {
+        try {
+          const size = 64;
+          const canvas = document.createElement('canvas');
+          canvas.width = size; canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, size, size);
+
+          // Draw letter H using Press Start 2P
+          ctx.fillStyle = '#1F2D3D';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = 'bold 42px "Press Start 2P","VT323",monospace';
+          ctx.fillText('H', size / 2, size / 2 + 2);
+
+          // Assign as favicon
+          const url = canvas.toDataURL('image/png');
+          let link = document.querySelector('link#favicon');
+          if (!link) {
+            link = document.createElement('link');
+            link.id = 'favicon';
+            link.rel = 'icon';
+            document.head.appendChild(link);
+          }
+          link.href = url;
+        } catch (e) {}
+      };
+
+      // Ensure font is loaded before drawing
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(makeFavicon);
+      } else {
+        window.addEventListener('load', makeFavicon);
+      }
+    })();
+  </script>
+  <link id="favicon" rel="icon">
   </head>
   <body>
     <div id="app"></div>
