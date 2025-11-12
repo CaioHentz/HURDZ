@@ -49,7 +49,8 @@ export class MenuScene extends Phaser.Scene {
 
     // Start game on SPACE
     this.input.keyboard.once('keydown-SPACE', () => {
-      this.scene.start('MainScene'); // MainScene will launch UIScene itself
+      // Pass the exact press timestamp so the run timer starts from this moment
+      this.scene.start('MainScene', { runStartAt: this.time.now }); // MainScene will launch UIScene itself
     });
 
     // Responsive layout

@@ -24,11 +24,33 @@ export class MainScene extends Phaser.Scene {
     this.stats = null;
     this.background = null;
     this.gameOverFlag = false;
+
+    // Power-ups
+    this.powerups = null;
+    this.activePowerUps = {}; // { [type]: endAtMs }
+    this.dropChance = 0.10; // 10% drop chance on kill
+
+    // Easter egg: numeric sequence '42' (god mode) and god mode end time
+    this.godModeEndAt = 0;
+    this.easterNum = { buffer: '', secret: '42' };
+
+    // Run timer
+    this.runStartAt = 0;
+    this.hudTickEvt = null;
+
+    // Run timer pause tracking
+    this.runPausedAccumMs = 0;
+    this.pausedAt = 0;
   }
 
   preload() {
     // No external assets: generate simple placeholder textures
     this.createPlaceholderTextures();
+  }
+
+  init(data) {
+    // Start the run timer at the moment the run begins (SPACE press)
+    this.runStartAt = (data && typeof data.runStartAt === 'number') ? data.runStartAt : this.time.now;
   }
 
   create() {
@@ -48,6 +70,13 @@ export class MainScene extends Phaser.Scene {
     this.zombies = this.physics.add.group({
       classType: Phaser.Physics.Arcade.Image,
       maxSize: 200,
+      runChildUpdate: false
+    });
+
+    // Power-ups group
+    this.powerups = this.physics.add.group({
+      classType: Phaser.Physics.Arcade.Image,
+      maxSize: 50,
       runChildUpdate: false
     });
 
@@ -109,6 +138,11 @@ export class MainScene extends Phaser.Scene {
       this.handlePlayerHit(zombie);
     });
 
+    // Power-up pickup
+    this.physics.add.overlap(this.player, this.powerups, (player, pu) => {
+      this.collectPowerUp(pu);
+    });
+
     // Particles
     this.bloodEmitter = this.add.particles(0, 0, 'blood', {
       speed: { min: 60, max: 120 },
@@ -122,6 +156,13 @@ export class MainScene extends Phaser.Scene {
     // Camera stays static, HUD scene will render on top
     this.events.emit('hud-init', this.getHUDPayload());
 
+    // Periodic HUD tick to refresh run timer
+    this.hudTickEvt = this.time.addEvent({
+      delay: 500,
+      loop: true,
+      callback: () => this.events.emit('hud-update', this.getHUDPayload())
+    });
+
     // Kill milestones configuration
     this.killMilestoneTargets = [10, 100, 1000, 5000, 10000, 100000, 1000000];
     this.killMilestonesShown = new Set();
@@ -130,12 +171,25 @@ export class MainScene extends Phaser.Scene {
     this.easter = { buffer: '', secret: 'cbum' };
     this.input.keyboard.on('keydown', (ev) => {
       const k = ev.key ? ev.key.toLowerCase() : '';
+
+      // Easter egg: type letters for 'cbum' to spawn massive zombie
       if (/^[a-z]$/.test(k)) {
         const s = this.easter.secret;
         this.easter.buffer = (this.easter.buffer + k).slice(-s.length);
         if (this.easter.buffer === s) {
           this.spawnMassiveZombie();
           this.easter.buffer = '';
+        }
+      }
+
+      // Easter egg: type digits '42' to enable Lv.100 upgrades for 15s
+      if (/^[0-9]$/.test(k)) {
+        const s2 = this.easterNum?.secret || '42';
+        const prev = this.easterNum?.buffer || '';
+        this.easterNum.buffer = (prev + k).slice(-s2.length);
+        if (this.easterNum.buffer === s2) {
+          this.activateAllLevel100();
+          this.easterNum.buffer = '';
         }
       }
     });
@@ -188,7 +242,7 @@ export class MainScene extends Phaser.Scene {
 
   resetFireTimer() {
     if (this.fireTimer) this.fireTimer.remove(false);
-    this.stats = getComputedStats();
+    this.stats = this.computeEffectiveStats();
     this.fireTimer = this.time.addEvent({
       delay: this.stats.fireInterval,
       loop: true,
@@ -279,6 +333,7 @@ export class MainScene extends Phaser.Scene {
       bullet.setVelocity(vx, vy);
       bullet.data = bullet.data || new Phaser.Data.DataManager(bullet);
       bullet.data.set('damage', this.stats.damage);
+      bullet.data.set('pierceLeft', this.isPowerActive('pierce') ? 2 : 0);
 
       // Auto-destroy based on weapon lifetime
       const life = (this.stats && this.stats.bulletLifetime) ? this.stats.bulletLifetime : 1200;
@@ -448,6 +503,91 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  // Power-up pickup announcement toast
+  showPowerupToast(type) {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const info = {
+      damage: { name: 'Damage Boost', desc: '+40% damage for 8s', color: '#D1495B' },
+      fireRate: { name: 'Haste', desc: '-30% fire interval for 8s', color: '#FF8C42' },
+      speed: { name: 'Speed Boost', desc: '+50% move speed for 6s', color: '#2ECC71' },
+      pierce: { name: 'Piercing Rounds', desc: 'Bullets pierce up to 2 enemies for 8s', color: '#2AA1FF' },
+      heal: { name: 'Medkit', desc: '+35 HP instantly', color: '#FF66CC' }
+    }[type] || { name: 'Power-Up', desc: 'Effect applied', color: '#eaeaea' };
+
+    const msg = this.add.text(w / 2, h / 2 - 180, `${info.name}\n${info.desc}`, {
+      fontFamily: `'Press Start 2P','VT323',monospace`,
+      fontSize: '16px',
+      color: info.color,
+      stroke: '#1F2D3D',
+      strokeThickness: 2,
+      align: 'center',
+      lineSpacing: 6
+    })
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
+      .setDepth(9999)
+      .setAlpha(0.95);
+
+    // Fade out and destroy after ~2 seconds
+    this.time.delayedCall(2000, () => {
+      if (!msg || !msg.active) return;
+      this.tweens.add({
+        targets: msg,
+        alpha: 0,
+        duration: 250,
+        onComplete: () => { if (msg && msg.active) msg.destroy(); }
+      });
+    });
+  }
+
+  // Pause/resume run timer helpers
+  pauseRunTimer() {
+    if (!this.pausedAt) this.pausedAt = this.time.now;
+  }
+
+  resumeRunTimer() {
+    if (this.pausedAt) {
+      this.runPausedAccumMs += (this.time.now - this.pausedAt);
+      this.pausedAt = 0;
+    }
+  }
+
+  // Easter egg action: temporary Lv.100 upgrades for 15 seconds
+  activateAllLevel100() {
+    this.godModeEndAt = this.time.now + 15000;
+    // Refresh weapon timing and HUD
+    this.resetFireTimer();
+    this.events.emit('hud-update', this.getHUDPayload());
+
+    // Toast
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const msg = this.add.text(w / 2, h / 2 - 200, 'ULTIMATE POWER\nAll Upgrades Lv.100 for 15s', {
+      fontFamily: `'Press Start 2P','VT323',monospace`,
+      fontSize: '18px',
+      color: '#6A4C93',
+      stroke: '#1F2D3D',
+      strokeThickness: 2,
+      align: 'center',
+      lineSpacing: 6
+    })
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
+      .setDepth(9999)
+      .setAlpha(0.97);
+
+    this.time.delayedCall(1800, () => { if (msg && msg.active) msg.destroy(); });
+
+    // Schedule end to recompute stats when it expires
+    this.time.delayedCall(15050, () => {
+      if (!this.isGodModeActive()) {
+        this.resetFireTimer();
+        this.events.emit('hud-update', this.getHUDPayload());
+      }
+    });
+  }
+
   checkKillMilestone(total) {
     for (const target of this.killMilestoneTargets || []) {
       if (total >= target && !this.killMilestonesShown.has(target)) {
@@ -467,8 +607,19 @@ export class MainScene extends Phaser.Scene {
       // Death
       this.bloodEmitter.emitParticleAt(zombie.x, zombie.y);
       this.playKillImpact();
+      const zx = zombie.x, zy = zombie.y;
       zombie.destroy();
-      bullet.destroy();
+
+      // Roll for power-up drop
+      this.rollPowerupDrop(zx, zy);
+
+      // Bullet pierce handling on kill
+      const pierce = bullet.data?.get('pierceLeft') || 0;
+      if (pierce > 0) {
+        bullet.data.set('pierceLeft', pierce - 1);
+      } else {
+        bullet.destroy();
+      }
       this.runKills += 1;
       addKills(1);
       this.checkKillMilestone(getState().totalKills);
@@ -532,12 +683,16 @@ export class MainScene extends Phaser.Scene {
     // Clear entities
     this.bullets.clear(true, true);
     this.zombies.clear(true, true);
+    if (this.powerups) this.powerups.clear(true, true);
 
     // Reset stats and timers
     this.stats = getComputedStats();
     this.hp = this.stats.maxHP;
     this.runKills = 0;
     this.gameOverFlag = false;
+    this.runStartAt = this.time.now;
+    this.runPausedAccumMs = 0;
+    this.pausedAt = 0;
 
     // Reset difficulty to initial
     this.difficulty = {
@@ -579,6 +734,10 @@ export class MainScene extends Phaser.Scene {
   // HUD payload
   getHUDPayload() {
     const s = this.stats;
+    const list = Object.entries(this.activePowerUps || {}).map(([type, endAt]) => ({
+      type,
+      remainingMs: Math.max(0, Math.round(endAt - this.time.now))
+    }));
     return {
       hp: this.hp,
       maxHP: s.maxHP,
@@ -586,8 +745,119 @@ export class MainScene extends Phaser.Scene {
       kills: getState().totalKills,
       runKills: this.runKills,
       weapon: s.weapon,
-      fireInterval: s.fireInterval
+      fireInterval: s.fireInterval,
+      powerups: list,
+      runMs: Math.max(0, Math.round(this.time.now - (this.runStartAt || 0) - (this.runPausedAccumMs || 0) - (this.pausedAt ? (this.time.now - this.pausedAt) : 0)))
     };
+  }
+
+  // ----- Power-ups: computed stats and helpers -----
+  computeEffectiveStats() {
+    const base = getComputedStats();
+    let s = { ...base };
+
+    // If god mode is active, simulate upgrades at level 100 using same formulas as state.js
+    if (this.isGodModeActive()) {
+      if (s.weapon === 'shotgun') {
+        const dmgLvl = 100, frLvl = 100, spdLvl = 100;
+        const baseInterval = 700;
+        const interval = Math.max(120, Math.round(baseInterval * Math.pow(0.94, frLvl)));
+        s.damage = Math.round(6 + dmgLvl * 2.5);
+        s.fireInterval = interval;
+        s.playerSpeed = Math.round(200 + spdLvl * 25);
+        // keep other shotgun props from base (pelletCount, spreadDeg, speeds, lifetimes)
+      } else {
+        // pistol
+        const dmgLvl = 100, frLvl = 100, spdLvl = 100;
+        const baseInterval = 400;
+        const interval = Math.max(90, Math.round(baseInterval * Math.pow(0.92, frLvl)));
+        s.damage = Math.round(10 + dmgLvl * 4);
+        s.fireInterval = interval;
+        s.playerSpeed = Math.round(220 + spdLvl * 25);
+      }
+    }
+
+    // Apply temporary power-ups on top
+    if (this.isPowerActive('damage')) s.damage = Math.round(s.damage * 1.4);
+    if (this.isPowerActive('fireRate')) s.fireInterval = Math.max(60, Math.round(s.fireInterval * 0.7));
+    if (this.isPowerActive('speed')) s.playerSpeed = Math.round(s.playerSpeed * 1.5);
+    return s;
+  }
+
+  isGodModeActive() {
+    return !!(this.godModeEndAt && this.godModeEndAt > this.time.now);
+  }
+
+  isPowerActive(type) {
+    const endAt = this.activePowerUps?.[type];
+    return !!(endAt && endAt > this.time.now);
+  }
+
+  rollPowerupDrop(x, y) {
+    if (!this.powerups) return;
+    if (Math.random() > this.dropChance) return;
+    const types = ['damage', 'fireRate', 'speed', 'pierce', 'heal'];
+    const type = types[Phaser.Math.Between(0, types.length - 1)];
+    const pu = this.powerups.get(x, y, 'powerup');
+    if (!pu) return;
+    pu.setActive(true).setVisible(true);
+    pu.setDepth(1);
+    pu.setScale(1);
+    pu.body.setSize(18, 18);
+    pu.data = pu.data || new Phaser.Data.DataManager(pu);
+    pu.data.set('type', type);
+    const tints = {
+      damage: 0xD1495B,
+      fireRate: 0xFF8C42,
+      speed: 0x2ECC71,
+      pierce: 0x2AA1FF,
+      heal: 0xFF66CC
+    };
+    pu.setTint(tints[type] || 0xffffff);
+    this.tweens.add({
+      targets: pu,
+      y: y - 6,
+      yoyo: true,
+      repeat: -1,
+      duration: 500,
+      ease: 'sine.inOut'
+    });
+    // auto-despawn after 12s
+    this.time.delayedCall(12000, () => { if (pu.active) pu.destroy(); });
+  }
+
+  collectPowerUp(pu) {
+    const type = pu?.data?.get('type');
+    if (!type) { if (pu) pu.destroy(); return; }
+    const now = this.time.now;
+
+    if (type === 'heal') {
+      const s = this.stats || getComputedStats();
+      this.hp = Math.min(s.maxHP, this.hp + 35);
+      this.events.emit('hud-update', this.getHUDPayload());
+      this.showPowerupToast(type);
+    } else {
+      const durations = { damage: 8000, fireRate: 8000, speed: 6000, pierce: 8000 };
+      const dur = durations[type] || 6000;
+      this.activePowerUps[type] = now + dur;
+      // schedule expiry cleanup
+      this.time.delayedCall(dur + 10, () => {
+        if (this.activePowerUps[type] && this.activePowerUps[type] <= this.time.now) {
+          delete this.activePowerUps[type];
+          this.resetFireTimer();
+          this.events.emit('hud-update', this.getHUDPayload());
+        }
+      });
+      // apply immediate stat changes if needed
+      this.resetFireTimer();
+      this.events.emit('hud-update', this.getHUDPayload());
+      this.showPowerupToast(type);
+    }
+
+    // Feedback and remove pickup
+    this.cameras.main.flash(120, 120, 40, 160);
+    this.playTone(880, 80, 0.03, 'sine', 2000);
+    pu.destroy();
   }
 
   // ----- Utility: generate placeholder textures -----
@@ -661,6 +931,13 @@ export class MainScene extends Phaser.Scene {
     gBlood.fillRect(0, 0, 4, 4);
     gBlood.generateTexture('blood', 4, 4);
     gBlood.destroy();
+
+    // Power-up pickup: plain square (base white, tinted per type)
+    const gPU = this.make.graphics({ x: 0, y: 0, add: false });
+    gPU.fillStyle(0xffffff, 1);
+    gPU.fillRect(0, 0, 18, 18);
+    gPU.generateTexture('powerup', 18, 18);
+    gPU.destroy();
 
     // Grass tile
     const gGrass = this.make.graphics({ x: 0, y: 0, add: false });

@@ -20,6 +20,8 @@ export class UIScene extends Phaser.Scene {
       coinsText: null,
       killsText: null,
       weaponText: null,
+      powerupsText: null,
+      timerText: null,
       signatureText: null
     };
     this.overlay = {
@@ -80,6 +82,18 @@ export class UIScene extends Phaser.Scene {
       fontSize: '14px',
       color: '#0D3B66'
     }).setDepth(1000).setScrollFactor(0);
+    this.hud.powerupsText = this.add.text(12, 98, '🎁 None', {
+      fontFamily: `'Press Start 2P','VT323',monospace`,
+      fontSize: '12px',
+      color: '#444444'
+    }).setDepth(1000).setScrollFactor(0);
+
+    // Top-center run timer
+    this.hud.timerText = this.add.text(this.scale.width / 2, 10, '⏱ 00:00', {
+      fontFamily: `'Press Start 2P','VT323',monospace`,
+      fontSize: '14px',
+      color: '#1F2D3D'
+    }).setOrigin(0.5, 0).setDepth(1000).setScrollFactor(0);
 
     // Bottom-right signature
     this.hud.signatureText = this.add.text(this.scale.width - 12, this.scale.height - 12, 'v0.1.0-alpha - Caio Hentz - 2025', {
@@ -113,6 +127,36 @@ export class UIScene extends Phaser.Scene {
       const w = d.weapon || getSelectedWeapon();
       const rate = d.fireInterval ? `${d.fireInterval}ms` : '';
       this.hud.weaponText.setText(`🔫 ${w} ${rate ? '(' + rate + ')' : ''}`);
+    }
+    if (this.hud.powerupsText) {
+      const arr = Array.isArray(d.powerups) ? d.powerups : [];
+      if (arr.length === 0) {
+        this.hud.powerupsText.setText('🎁 None');
+      } else {
+        const short = {
+          damage: 'DMG',
+          fireRate: 'RATE',
+          speed: 'SPD',
+          pierce: 'PIERCE',
+          shield: 'SHIELD',
+          heal: 'HEAL'
+        };
+        const text = arr.map((p) => {
+          const secs = Math.ceil((p.remainingMs || 0) / 1000);
+          return `${short[p.type] || p.type}:${secs}s`;
+        }).join('  ');
+        this.hud.powerupsText.setText(`🎁 ${text}`);
+      }
+    }
+
+    // Run timer format mm:ss
+    if (this.hud.timerText) {
+      const ms = d.runMs || 0;
+      const secs = Math.floor(ms / 1000);
+      const mm = Math.floor(secs / 60);
+      const ss = secs % 60;
+      const fmt = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+      this.hud.timerText.setText(`⏱ ${fmt}`);
     }
   }
 
@@ -322,6 +366,12 @@ export class UIScene extends Phaser.Scene {
     if (this.overlay.shotgunBtn) this.overlay.shotgunBtn.container.setPosition(cx, rowY(3));
     if (this.overlay.restartBtn) this.overlay.restartBtn.container.setPosition(cx, rowY(5));
 
+    // Position power-ups text under weapon
+    if (this.hud.powerupsText) this.hud.powerupsText.setPosition(12, 98);
+
+    // Position run timer at top-center
+    if (this.hud.timerText) this.hud.timerText.setPosition(w / 2, 10);
+
     // Position signature in bottom-right
     if (this.hud.signatureText) this.hud.signatureText.setPosition(w - 12, h - 10);
   }
@@ -389,12 +439,20 @@ export class UIScene extends Phaser.Scene {
     if (!this.scene.isPaused('MainScene')) {
       this.scene.pause('MainScene');
     }
+    // Pause run timer as well
+    const main = this.scene.get('MainScene');
+    if (main && typeof main.pauseRunTimer === 'function') main.pauseRunTimer();
+
     if (this.pauseOverlay?.container) {
       this.pauseOverlay.container.setVisible(true);
     }
   }
 
   hidePause() {
+    // Resume run timer when leaving pause
+    const main = this.scene.get('MainScene');
+    if (main && typeof main.resumeRunTimer === 'function') main.resumeRunTimer();
+
     if (this.pauseOverlay?.container) {
       this.pauseOverlay.container.setVisible(false);
     }
