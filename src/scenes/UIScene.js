@@ -41,6 +41,11 @@ export class UIScene extends Phaser.Scene {
       resumeBtn: null,
       restartBtn: null
     };
+
+    // Low-HP edge overlay
+    this.lowHpOverlay = { container: null, rects: [] };
+    this.lowHpPulseTween = null;
+
     this.hudData = {
       hp: 0,
       maxHP: 0,
@@ -110,6 +115,9 @@ export class UIScene extends Phaser.Scene {
     this.scale.on('resize', () => this.layout());
     this.layout();
 
+    // Low-HP visual overlay
+    this.buildLowHpOverlay();
+
     // Build pause overlay and bind ESC to toggle pause
     this.buildPauseOverlay();
     this.input.keyboard.on('keydown-ESC', () => this.togglePause());
@@ -158,6 +166,12 @@ export class UIScene extends Phaser.Scene {
       const fmt = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
       this.hud.timerText.setText(`⏱ ${fmt}`);
     }
+
+    // Low HP overlay toggle (pulse when below threshold)
+    const hpVal = d.hp || 0;
+    const threshold = 20;
+    if (hpVal > 0 && hpVal < threshold) this.showLowHpOverlay();
+    else this.hideLowHpOverlay();
   }
 
   // ----- Overlay -----
@@ -374,6 +388,88 @@ export class UIScene extends Phaser.Scene {
 
     // Position signature in bottom-right
     if (this.hud.signatureText) this.hud.signatureText.setPosition(w - 12, h - 10);
+
+    // Resize low HP overlay to fit
+    this.sizeLowHpOverlay();
+  }
+
+  // ----- Low-HP edge overlay -----
+  buildLowHpOverlay() {
+    const w = this.scale.width;
+    const h = this.scale.height;
+
+    const container = this.add.container(0, 0).setDepth(2400).setVisible(false);
+    const rects = [];
+
+    const thicknessOuter = 28;
+    const thicknessInner = 14;
+
+    // Outer rectangles (lighter alpha)
+    const topOuter = this.add.rectangle(w / 2, thicknessOuter / 2, w, thicknessOuter, 0xFF0000, 0.18);
+    const bottomOuter = this.add.rectangle(w / 2, h - thicknessOuter / 2, w, thicknessOuter, 0xFF0000, 0.18);
+    const leftOuter = this.add.rectangle(thicknessOuter / 2, h / 2, thicknessOuter, h, 0xFF0000, 0.18);
+    const rightOuter = this.add.rectangle(w - thicknessOuter / 2, h / 2, thicknessOuter, h, 0xFF0000, 0.18);
+
+    // Inner rectangles (stronger alpha)
+    const topInner = this.add.rectangle(w / 2, thicknessInner / 2, w, thicknessInner, 0xFF0000, 0.35);
+    const bottomInner = this.add.rectangle(w / 2, h - thicknessInner / 2, w, thicknessInner, 0xFF0000, 0.35);
+    const leftInner = this.add.rectangle(thicknessInner / 2, h / 2, thicknessInner, h, 0xFF0000, 0.35);
+    const rightInner = this.add.rectangle(w - thicknessInner / 2, h / 2, thicknessInner, h, 0xFF0000, 0.35);
+
+    rects.push(topOuter, bottomOuter, leftOuter, rightOuter, topInner, bottomInner, leftInner, rightInner);
+    container.add(rects);
+
+    this.lowHpOverlay = { container, rects, thicknessOuter, thicknessInner };
+    this.sizeLowHpOverlay();
+  }
+
+  sizeLowHpOverlay() {
+    const data = this.lowHpOverlay;
+    if (!data || !data.container) return;
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const tO = data.thicknessOuter || 28;
+    const tI = data.thicknessInner || 14;
+    const [topOuter, bottomOuter, leftOuter, rightOuter, topInner, bottomInner, leftInner, rightInner] = data.rects;
+
+    if (topOuter) {
+      topOuter.setPosition(w / 2, tO / 2).setSize(w, tO);
+      bottomOuter.setPosition(w / 2, h - tO / 2).setSize(w, tO);
+      leftOuter.setPosition(tO / 2, h / 2).setSize(tO, h);
+      rightOuter.setPosition(w - tO / 2, h / 2).setSize(tO, h);
+
+      topInner.setPosition(w / 2, tI / 2).setSize(w, tI);
+      bottomInner.setPosition(w / 2, h - tI / 2).setSize(w, tI);
+      leftInner.setPosition(tI / 2, h / 2).setSize(tI, h);
+      rightInner.setPosition(w - tI / 2, h / 2).setSize(tI, h);
+    }
+  }
+
+  showLowHpOverlay() {
+    const data = this.lowHpOverlay;
+    if (!data || !data.container) return;
+    if (!data.container.visible) data.container.setVisible(true);
+    if (this.lowHpPulseTween && this.lowHpPulseTween.isPlaying()) return;
+
+    data.container.setAlpha(0.2);
+    this.lowHpPulseTween = this.tweens.add({
+      targets: data.container,
+      alpha: { from: 0.2, to: 0.5 },
+      duration: 650,
+      yoyo: true,
+      repeat: -1,
+      ease: 'sine.inOut'
+    });
+  }
+
+  hideLowHpOverlay() {
+    const data = this.lowHpOverlay;
+    if (!data || !data.container) return;
+    if (this.lowHpPulseTween) {
+      this.lowHpPulseTween.stop();
+      this.lowHpPulseTween = null;
+    }
+    data.container.setVisible(false);
   }
 
   // ----- Pause overlay -----

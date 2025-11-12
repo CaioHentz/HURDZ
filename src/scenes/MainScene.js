@@ -340,6 +340,29 @@ export class MainScene extends Phaser.Scene {
       this.time.delayedCall(life, () => {
         if (bullet.active) bullet.destroy();
       });
+
+      // Akimbo: shoot a mirrored bullet backwards
+      if (this.isPowerActive('akimbo')) {
+        const aBack = a + Math.PI;
+        const bx2 = this.player.x + Math.cos(aBack) * 24;
+        const by2 = this.player.y + Math.sin(aBack) * 24;
+        const b2 = this.bullets.get(bx2, by2, 'bullet');
+        if (b2) {
+          b2.setActive(true).setVisible(true);
+          b2.setDepth(1);
+          b2.setRotation(aBack);
+          b2.body.setCircle(4);
+          const vx2 = Math.cos(aBack) * bulletSpeed;
+          const vy2 = Math.sin(aBack) * bulletSpeed;
+          b2.setVelocity(vx2, vy2);
+          b2.data = b2.data || new Phaser.Data.DataManager(b2);
+          b2.data.set('damage', this.stats.damage);
+          b2.data.set('pierceLeft', this.isPowerActive('pierce') ? 2 : 0);
+          this.time.delayedCall(life, () => {
+            if (b2.active) b2.destroy();
+          });
+        }
+      }
     }
 
     // Shot sound (softer)
@@ -512,7 +535,9 @@ export class MainScene extends Phaser.Scene {
       fireRate: { name: 'Haste', desc: '-30% fire interval for 8s', color: '#FF8C42' },
       speed: { name: 'Speed Boost', desc: '+50% move speed for 6s', color: '#2ECC71' },
       pierce: { name: 'Piercing Rounds', desc: 'Bullets pierce up to 2 enemies for 8s', color: '#2AA1FF' },
-      heal: { name: 'Medkit', desc: '+35 HP instantly', color: '#FF66CC' }
+      heal: { name: 'Medkit', desc: '+35 HP instantly', color: '#FF66CC' },
+      nuke: { name: 'Nuke', desc: 'Eliminates all on-screen zombies', color: '#FFD700' },
+      akimbo: { name: 'Akimbo', desc: 'Shoots forwards and backwards for 8s', color: '#00FFFF' }
     }[type] || { name: 'Power-Up', desc: 'Effect applied', color: '#eaeaea' };
 
     const msg = this.add.text(w / 2, h / 2 - 180, `${info.name}\n${info.desc}`, {
@@ -796,7 +821,7 @@ export class MainScene extends Phaser.Scene {
   rollPowerupDrop(x, y) {
     if (!this.powerups) return;
     if (Math.random() > this.dropChance) return;
-    const types = ['damage', 'fireRate', 'speed', 'pierce', 'heal'];
+    const types = ['damage', 'fireRate', 'speed', 'pierce', 'heal', 'nuke', 'akimbo'];
     const type = types[Phaser.Math.Between(0, types.length - 1)];
     const pu = this.powerups.get(x, y, 'powerup');
     if (!pu) return;
@@ -811,7 +836,9 @@ export class MainScene extends Phaser.Scene {
       fireRate: 0xFF8C42,
       speed: 0x2ECC71,
       pierce: 0x2AA1FF,
-      heal: 0xFF66CC
+      heal: 0xFF66CC,
+      nuke: 0xFFD700,
+      akimbo: 0x00FFFF
     };
     pu.setTint(tints[type] || 0xffffff);
     this.tweens.add({
@@ -831,13 +858,33 @@ export class MainScene extends Phaser.Scene {
     if (!type) { if (pu) pu.destroy(); return; }
     const now = this.time.now;
 
-    if (type === 'heal') {
+    if (type === 'nuke') {
+      // Kill all zombies currently within the camera view
+      const view = this.cameras.main.worldView;
+      let kills = 0;
+      this.zombies.children.iterate((z) => {
+        if (!z || !z.active) return;
+        if (view.contains(z.x, z.y)) {
+          this.bloodEmitter.emitParticleAt(z.x, z.y);
+          z.destroy();
+          kills += 1;
+          addKills(1);
+          addCoins(10);
+        }
+      });
+      if (kills > 0) {
+        this.runKills += kills;
+        this.checkKillMilestone(getState().totalKills);
+        this.events.emit('hud-update', this.getHUDPayload());
+      }
+      this.showPowerupToast(type);
+    } else if (type === 'heal') {
       const s = this.stats || getComputedStats();
       this.hp = Math.min(s.maxHP, this.hp + 35);
       this.events.emit('hud-update', this.getHUDPayload());
       this.showPowerupToast(type);
     } else {
-      const durations = { damage: 8000, fireRate: 8000, speed: 6000, pierce: 8000 };
+      const durations = { damage: 8000, fireRate: 8000, speed: 6000, pierce: 8000, akimbo: 8000 };
       const dur = durations[type] || 6000;
       this.activePowerUps[type] = now + dur;
       // schedule expiry cleanup
